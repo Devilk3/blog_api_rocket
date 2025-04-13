@@ -8,7 +8,7 @@ mod routes;
 
 use crate::db::establish_connection;
 use routes::user::create_user;
-use rocket::serde::json::Json;
+//use rocket::serde::json::Json;
 
 #[launch]
 fn rocket() -> _ {
