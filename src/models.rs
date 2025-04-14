@@ -36,3 +36,19 @@ pub struct NewPost {
     pub title: String,
     pub body: String,
 }
+
+#[derive(Serialize)]
+pub struct PaginatedPosts {
+    pub records: Vec<Post>,
+    pub meta: PaginationMeta,
+}
+
+#[derive(Serialize)]
+pub struct PaginationMeta {
+    pub current_page: i64,
+    pub per_page: i64,
+    pub from: i64,
+    pub to: i64,
+    pub total_pages: i64,
+    pub total_docs: i64,
+}

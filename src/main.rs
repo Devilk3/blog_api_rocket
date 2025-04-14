@@ -8,7 +8,8 @@ mod routes;
 
 use crate::db::establish_connection;
 use routes::user::create_user;
-use routes::post::create_post;
+//use routes::post::create_post;
+use routes::post::{create_post, list_posts};
 //use rocket::serde::json::Json;
 
 #[launch]
@@ -17,5 +18,5 @@ fn rocket() -> _ {
 
     rocket::build()
         .manage(establish_connection()) // DB pool
-        .mount("/api", routes![create_user, create_post])
+        .mount("/api", routes![create_user, create_post, list_posts])
 }
