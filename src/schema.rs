@@ -10,6 +10,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    posts_tags (id) {
+        id -> Nullable<Integer>,
+        fk_post_id -> Integer,
+        tag -> Text,
+    }
+}
+
+diesel::table! {
     users (id) {
         id -> Integer,
         username -> Text,
@@ -19,8 +27,10 @@ diesel::table! {
 }
 
 diesel::joinable!(posts -> users (created_by));
+diesel::joinable!(posts_tags -> posts (fk_post_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     posts,
+    posts_tags,
     users,
 );
