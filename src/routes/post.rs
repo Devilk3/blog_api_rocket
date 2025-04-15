@@ -1,15 +1,13 @@
 use rocket::serde::json::Json;
 use rocket::State;
-use diesel::sql_types::Nullable;
-
-use crate::models::{PaginatedPosts, PaginationMeta};
+use rocket::http::Status;
+use diesel::sql_types::{Integer, Text, Nullable};  
 use crate::models::{NewPostWithTags, NewPostTag, PostWithTags};
 
 use crate::db::DbPool;
 use crate::schema::posts::id as post_id;
-use crate::schema::posts::dsl::posts;
+use crate::models::UserInfo;
 //use crate::schema::posts_tags::dsl::{posts_tags};
-use crate::schema::posts::dsl::*;
 use diesel::prelude::*;
 
 #[post("/create_post", data = "<post_data>")]
@@ -57,7 +55,7 @@ pub fn create_post(
     // Step 4: Return response
     Json(PostWithTags {
         id: new_post_id,
-        created_by: post_data.created_by,
+        created_by: None,
         title: post_data.title.clone(),
         body: post_data.body.clone(),
         tags: post_data.tags.clone(),
@@ -65,104 +63,104 @@ pub fn create_post(
 }
 
 
+#[derive(QueryableByName)]
+struct RawPost {
+    #[sql_type = "Integer"]
+    id: i32,
 
-#[get("/list_posts?<page>&<limit>&<search>")]
-pub fn list_posts(
-    pool: &State<DbPool>,
-    page: Option<i64>,
-    limit: Option<i64>,
-    search: Option<String>,
-) -> Json<PaginatedPosts> {
-  //  use diesel::dsl::sql;
-    use diesel::sql_types::{Integer, Text};
+    #[sql_type = "Text"]
+    title: String,
 
-    let mut conn = pool.get().expect("DB pool error");
+    #[sql_type = "Text"]
+    body: String,
 
+    #[sql_type = "Nullable<Text>"]
+    tags: Option<String>,
+
+    #[sql_type = "Nullable<Integer>"]
+    user_id: Option<i32>,
+
+    #[sql_type = "Nullable<Text>"]
+    username: Option<String>,
+
+    #[sql_type = "Nullable<Text>"]
+    first_name: Option<String>,
+
+    #[sql_type = "Nullable<Text>"]
+    last_name: Option<String>,
+}
+
+
+
+
+#[rocket::get("/posts?<page>&<limit>&<search>")]
+pub async fn list_posts(
+    pool: &State<DbPool>, 
+    page: Option<u32>, 
+    limit: Option<u32>, 
+    search: Option<String>
+) -> Result<Json<Vec<PostWithTags>>, Status> {
     let page = page.unwrap_or(1);
     let limit = limit.unwrap_or(10);
     let offset = (page - 1) * limit;
 
     let like_pattern = search
-        .as_ref()
         .map(|term| format!("%{}%", term))
-        .unwrap_or("%%".to_string());
+        .unwrap_or_else(|| "%%".to_string());
 
-        #[derive(QueryableByName)]
-        struct RawPost {
-            #[sql_type = "Integer"]
-            #[diesel(column_name = id)]
-            post_id1: i32,
-        
-            #[sql_type = "Integer"]
-            #[diesel(column_name = created_by)]
-            post_created_by1: i32,
-        
-            #[sql_type = "Text"]
-            #[diesel(column_name = title)]
-            post_title: String,
-        
-            #[sql_type = "Text"]
-            #[diesel(column_name = body)]
-            post_body: String,
-        
-            #[sql_type = "Nullable<Text>"]
-            #[diesel(column_name = tags)]
-            tag_list: Option<String>,
-        }
+    let mut conn = pool.get().expect("DB connection failed");
 
     let raw_posts: Vec<RawPost> = diesel::sql_query(
-        r#"
-        SELECT p.id, p.created_by, p.title, p.body,
-               GROUP_CONCAT(pt.tag, ',') as tags
+        "
+        SELECT 
+            p.id,
+            p.title,
+            p.body,
+            GROUP_CONCAT(pt.tag) AS tags,
+            u.id AS user_id,
+            u.username,
+            u.first_name,
+            u.last_name
         FROM posts p
-        LEFT JOIN posts_tags pt ON p.id = pt.fk_post_id
+        LEFT JOIN posts_tags pt ON pt.fk_post_id = p.id
+        LEFT JOIN users u ON p.created_by = u.id
         WHERE p.title LIKE ?
         GROUP BY p.id
         ORDER BY p.id DESC
         LIMIT ? OFFSET ?
-    "#,
+        "
     )
     .bind::<Text, _>(like_pattern)
     .bind::<Integer, _>(limit as i32)
     .bind::<Integer, _>(offset as i32)
-    .load(&mut conn)
-    .expect("Failed to load posts with tags");
+    .load::<RawPost>(&mut conn)
+    .expect("Failed to load raw posts");
 
-    let post_list: Vec<PostWithTags> = raw_posts
+    let posts1: Vec<PostWithTags> = raw_posts
         .into_iter()
-        .map(|raw| PostWithTags {
-            id: raw.post_id1,
-            created_by: raw.post_created_by1,
-            title: raw.post_title,
-            body: raw.post_body,
-            tags: raw
-                .tag_list
+        .map(|raw| {
+            let tags = raw.tags
                 .unwrap_or_default()
                 .split(',')
-                .map(|s| s.to_string())
-                .collect(),
+                .map(|s| s.trim().to_string())
+                .collect::<Vec<_>>();
+
+            let created_by = raw.user_id.map(|id1| UserInfo {
+                user_id: id1,
+                username: raw.username.unwrap_or_default(),
+                first_name: raw.first_name,
+                last_name: raw.last_name,
+            });
+
+            PostWithTags {
+                id: raw.id,
+                title: raw.title,
+                body: raw.body,
+                tags,
+                created_by,
+            }
         })
         .collect();
 
-    let total_docs: i64 = posts
-        .filter(title.like(search.unwrap_or("%%".to_string())))
-        .count()
-        .get_result(&mut conn)
-        .expect("Failed to count posts");
-
-    let total_pages = (total_docs as f64 / limit as f64).ceil() as i64;
-    let from = offset + 1;
-    let to = offset + post_list.len() as i64;
-
-    Json(PaginatedPosts {
-        records: post_list,
-        meta: PaginationMeta {
-            current_page: page,
-            per_page: limit,
-            from,
-            to,
-            total_pages,
-            total_docs,
-        },
-    })
+    Ok(Json(posts1))  // ✅ This line returns the final API response
 }

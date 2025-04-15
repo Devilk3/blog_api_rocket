@@ -64,10 +64,10 @@ pub struct NewPostTag<'a> {
 #[derive(Queryable, Serialize)]
 pub struct PostWithTags {
     pub id: i32,
-    pub created_by: i32,
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
+    pub created_by: Option<UserInfo>, // Optional if created_by is null
 }
 
 #[derive(Deserialize)]
@@ -76,4 +76,12 @@ pub struct NewPostWithTags {
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct UserInfo {
+    pub user_id: i32,
+    pub username: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
 }
