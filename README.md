@@ -59,8 +59,8 @@ This is a simple blog backend written in **Rust**, using:
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repo-url>
-cd blog-api-rust
+git clone https://github.com/Devilk3/blog_api_rocket.git
+cd blog-api-rocket
 ```
 
 ### 2. Install Diesel CLI
@@ -131,9 +131,9 @@ The server runs at `http://localhost:8000`.
       "tags": ["rust", "diesel", "blog"],
       "created_by": {
         "user_id": 1,
-        "username": "john_doe",
-        "first_name": "John",
-        "last_name": "Doe"
+        "username": "devilk33",
+        "first_name": "Devilal",
+        "last_name": "Kumawat"
       }
     }
   ],
