@@ -1,5 +1,3 @@
-// src/models.rs
-
 use diesel::prelude::*;
 use serde::{Serialize, Deserialize};
 use crate::schema::posts;

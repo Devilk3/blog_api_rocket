@@ -17,13 +17,6 @@ pub fn create_user(
         .values(&*user_data)
         .execute(&mut conn)
         .expect("Failed to insert user");
-    
-    /* 
-    let created_user = users
-        .order(id.desc())
-        .first::<User>(&mut conn)
-        .expect("Failed to fetch user");
-    */
 
         let created_user = users
         .select((id, username, first_name, last_name))

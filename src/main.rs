@@ -8,9 +8,8 @@ mod routes;
 
 use crate::db::establish_connection;
 use routes::user::create_user;
-//use routes::post::create_post;
 use routes::post::{create_post, list_posts};
-//use rocket::serde::json::Json;
+
 
 #[launch]
 fn rocket() -> _ {

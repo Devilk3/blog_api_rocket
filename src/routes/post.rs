@@ -1,14 +1,16 @@
 use rocket::serde::json::Json;
 use rocket::State;
-use rocket::http::Status;
+use diesel::dsl::sql;
 use diesel::sql_types::{Integer, Text, Nullable};  
 use crate::models::{NewPostWithTags, NewPostTag, PostWithTags};
-
 use crate::db::DbPool;
 use crate::schema::posts::id as post_id;
-use crate::models::UserInfo;
-//use crate::schema::posts_tags::dsl::{posts_tags};
 use diesel::prelude::*;
+use rocket::http::Status;
+use crate::models::UserInfo;
+use crate::models::PaginatedPosts;
+use crate::models::PaginationMeta;
+
 
 #[post("/create_post", data = "<post_data>")]
 pub fn create_post(
@@ -20,7 +22,7 @@ pub fn create_post(
 
     let mut conn = pool.get().expect("DB pool error");
 
-    // Step 1: Insert into `posts` table
+    // Step 1: Inserting into 'posts' table
     diesel::insert_into(posts)
         .values((
             created_by.eq(&post_data.created_by),
@@ -63,43 +65,17 @@ pub fn create_post(
 }
 
 
-#[derive(QueryableByName)]
-struct RawPost {
-    #[sql_type = "Integer"]
-    id: i32,
-
-    #[sql_type = "Text"]
-    title: String,
-
-    #[sql_type = "Text"]
-    body: String,
-
-    #[sql_type = "Nullable<Text>"]
-    tags: Option<String>,
-
-    #[sql_type = "Nullable<Integer>"]
-    user_id: Option<i32>,
-
-    #[sql_type = "Nullable<Text>"]
-    username: Option<String>,
-
-    #[sql_type = "Nullable<Text>"]
-    first_name: Option<String>,
-
-    #[sql_type = "Nullable<Text>"]
-    last_name: Option<String>,
-}
-
-
 
 
 #[rocket::get("/posts?<page>&<limit>&<search>")]
 pub async fn list_posts(
-    pool: &State<DbPool>, 
-    page: Option<u32>, 
-    limit: Option<u32>, 
-    search: Option<String>
-) -> Result<Json<Vec<PostWithTags>>, Status> {
+    pool: &State<DbPool>,
+    page: Option<u32>,
+    limit: Option<u32>,
+    search: Option<String>,
+) -> Result<Json<PaginatedPosts>, Status> {
+    use crate::schema::{posts, posts_tags, users};
+
     let page = page.unwrap_or(1);
     let limit = limit.unwrap_or(10);
     let offset = (page - 1) * limit;
@@ -110,57 +86,81 @@ pub async fn list_posts(
 
     let mut conn = pool.get().expect("DB connection failed");
 
-    let raw_posts: Vec<RawPost> = diesel::sql_query(
-        "
-        SELECT 
-            p.id,
-            p.title,
-            p.body,
-            GROUP_CONCAT(pt.tag) AS tags,
-            u.id AS user_id,
-            u.username,
-            u.first_name,
-            u.last_name
-        FROM posts p
-        LEFT JOIN posts_tags pt ON pt.fk_post_id = p.id
-        LEFT JOIN users u ON p.created_by = u.id
-        WHERE p.title LIKE ?
-        GROUP BY p.id
-        ORDER BY p.id DESC
-        LIMIT ? OFFSET ?
-        "
-    )
-    .bind::<Text, _>(like_pattern)
-    .bind::<Integer, _>(limit as i32)
-    .bind::<Integer, _>(offset as i32)
-    .load::<RawPost>(&mut conn)
-    .expect("Failed to load raw posts");
+    let results = posts::table
+        .left_join(users::table.on(posts::created_by.eq(users::id)))
+        .left_join(posts_tags::table.on(posts_tags::fk_post_id.eq(posts::id)))
+        .filter(posts::title.like(&like_pattern))
+        .group_by(posts::id)
+        .order_by(posts::id.desc())
+        .limit(limit.into())
+        .offset(offset.into())
+        .select((
+            posts::id,
+            posts::title,
+            posts::body,
+            sql::<Nullable<Text>>("GROUP_CONCAT(DISTINCT posts_tags.tag)"),
+            sql::<Nullable<Integer>>("MAX(users.id)"),
+            sql::<Nullable<Text>>("MAX(users.username)"),
+            sql::<Nullable<Text>>("MAX(users.first_name)"),
+            sql::<Nullable<Text>>("MAX(users.last_name)"),
+        ))
+        .load::<(
+            i32,
+            String,
+            String,
+            Option<String>,
+            Option<i32>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )>(&mut conn)
+        .unwrap();
 
-    let posts1: Vec<PostWithTags> = raw_posts
+    let from = offset + 1;
+    let to = offset + results.len() as u32;
+
+    let posts = results
         .into_iter()
-        .map(|raw| {
-            let tags = raw.tags
+        .map(|row| {
+            let (id, title, body, tags, user_id, username, first_name, last_name) = row;
+
+            let tags = tags
                 .unwrap_or_default()
                 .split(',')
                 .map(|s| s.trim().to_string())
-                .collect::<Vec<_>>();
+                .collect();
 
-            let created_by = raw.user_id.map(|id1| UserInfo {
-                user_id: id1,
-                username: raw.username.unwrap_or_default(),
-                first_name: raw.first_name,
-                last_name: raw.last_name,
+            let created_by = user_id.map(|uid| UserInfo {
+                user_id: uid,
+                username: username.unwrap_or_default(),
+                first_name,
+                last_name,
             });
 
             PostWithTags {
-                id: raw.id,
-                title: raw.title,
-                body: raw.body,
+                id,
+                title,
+                body,
                 tags,
                 created_by,
             }
         })
-        .collect();
+        .collect::<Vec<PostWithTags>>();
 
-    Ok(Json(posts1))  // ✅ This line returns the final API response
+    // Create the meta struct
+    let meta = PaginationMeta {
+        current_page: page as i64,
+        per_page: limit as i64,
+        from: from as i64,
+        to: to as i64,
+        total_pages: 0, // Placeholder for now
+        total_docs: 0,  // Placeholder for now
+    };
+
+    let response = PaginatedPosts {
+        records: posts,
+        meta,
+    };
+
+    Ok(Json(response))
 }
